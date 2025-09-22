@@ -6,6 +6,10 @@ import numpy as np
 import pandas as pd
 import random
 from typing import List, Tuple
+import json
+from PIL import Image
+import os
+
 
 @dataclass
 class AgentState:
@@ -45,31 +49,50 @@ class AgentState:
         self.traj.append((self.x, self.y))   # <-- track trajectory
 
 class Environment:
-    def __init__(self, width=100, height=100, n_obstacles=5, seed=42):
-        self.width = width
-        self.height = height
-        self.rng = np.random.RandomState(seed)
-        self.obstacles = self._gen_obstacles(n_obstacles)
+    def __init__(self, config_file="config.json"):
+        # Load and store config
+        with open(config_file, "r") as f:
+            self.config = json.load(f)
 
-    def _gen_obstacles(self, n):
-        obs = []
-        for _ in range(n):
-            x = float(self.rng.uniform(10, self.width-10))
-            y = float(self.rng.uniform(10, self.height-10))
-            r = float(self.rng.uniform(3, 8))
-            obs.append({"x": x, "y": y, "r": r})
-        return obs
+        # Basic attributes
+        if "floorplan" in self.config:
+            self.floorplan_path = os.path.join(os.path.dirname(__file__), self.config["floorplan"])
+            if not os.path.exists(self.floorplan_path):
+                raise FileNotFoundError(f"Floorplan image not found: {self.floorplan_path}")
+        else:
+            self.floorplan_path = None
+        self.width = self.config.get("width", 100)
+        self.height = self.config.get("height", 100)
 
-    def obstacles_df(self):
-        return pd.DataFrame(self.obstacles)
+        # Waypoints
+        self.waypoints = {
+            w["id"]: tuple(w["pos"]) for w in self.config.get("waypoints", [])
+        }
 
-def create_fleet(n_agents=4, env=None):
-    agents = []
-    for i in range(n_agents):
-        x = float(np.random.uniform(5, env.width-5))
-        y = float(np.random.uniform(5, env.height-5))
-        agents.append(AgentState(agent_id=f"Agent_{i+1}", x=x, y=y))
-    return agents
+        # Obstacles
+        self.obstacles = [
+            {"id": o["id"], "pos": tuple(o["pos"]), "size": tuple(o["size"])}
+            for o in self.config.get("obstacles", [])
+        ]
+
+        # Agents initialized empty — use create_fleet()
+        self.agents = []
+
+    def create_fleet(self, n_agents):
+        # """
+        # Create n_agents and place them at spawn points from config.json.
+        # If n_agents > number of spawns, cycle through them.
+        # """
+        self.agents = []  # reset
+        spawns = [a["spawn"] for a in self.config.get("agents", [])]
+        ids = [a["id"] for a in self.config.get("agents", [])]
+
+        for i in range(n_agents):
+            spawn = spawns[i % len(spawns)]
+            agent_id = ids[i % len(ids)]
+            self.agents.append(AgentState(agent_id=agent_id, x=spawn[0], y=spawn[1]))
+
+        return self.agents
 
 def state_snapshot(agents):
     return pd.DataFrame([a.to_dict() for a in agents])

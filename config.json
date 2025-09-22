@@ -1,0 +1,69 @@
+{
+  "floorplan": "assets/factory_floorplan_agents.png",
+  "width": 100,
+  "height": 100,
+  "agents": [
+    {
+      "id": "A1",
+      "spawn": [
+        10,
+        60
+      ]
+    },
+    {
+      "id": "A2",
+      "spawn": [
+        90,
+        60
+      ]
+    },
+    {
+      "id": "A3",
+      "spawn": [
+        15,
+        15
+      ]
+    },
+    {
+      "id": "A4",
+      "spawn": [
+        85,
+        20
+      ]
+    }
+  ],
+  "waypoints": [
+    {
+      "id": "W1",
+      "pos": [
+        30,
+        80
+      ]
+    },
+    {
+      "id": "W2",
+      "pos": [
+        80,
+        80
+      ]
+    },
+    {
+      "id": "W3",
+      "pos": [
+        50,
+        25
+      ]
+    },
+    {
+      "id": "W4",
+      "pos": [
+        70,
+        10
+      ]
+    }
+  ],
+  "obstacles": [
+    {"id": "M1", "pos": [40, 40], "size": [20, 10]},
+    {"id": "R1", "pos": [60, 70], "size": [10, 10]}
+  ]
+}

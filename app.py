@@ -4,15 +4,18 @@ import pandas as pd
 import time
 import plotly.graph_objects as go
 import plotly.express as px
+import os
 
-from simulation import Environment, create_fleet, state_snapshot
+from simulation import Environment, state_snapshot
 from autonomy import Autonomy
 from utils import generate_waypoints_for_agents
 from streamlit_plotly_events import plotly_events
 
+
 st.set_page_config(page_title="RebelWaveTech - Autonomous Fleet Control Demo", layout="wide")
 st.title("RebelWaveTech Autonomous Fleet Control — Demo")
 
+floorplan_path = os.path.join(os.path.dirname(__file__), "factory_floorplan_agents.png")
 # --- Sidebar controls ---
 st.sidebar.header("Simulation Controls")
 n_agents = st.sidebar.slider("Number of Agents", min_value=2, max_value=8, value=4)
@@ -34,22 +37,24 @@ comm_loss_step = st.sidebar.number_input("Comms Loss Step (frame)", min_value=0,
 
 # --- Initialize environment, fleet, autonomy ---
 if "env" not in st.session_state or regenerate_button:
-    st.session_state.env = Environment(width=100, height=100, n_obstacles=n_obstacles, seed=seed)
-    st.session_state.agents = create_fleet(n_agents=n_agents, env=st.session_state.env)
-    st.session_state.waypoints = generate_waypoints_for_agents(n_agents=n_agents, env_width=100, env_height=100, n_waypoints=3)
+    # st.session_state.env = Environment(width=100, height=100, n_obstacles=n_obstacles, seed=seed)
+    st.session_state.env = Environment(config_file="config.json")
+    st.session_state.agents = st.session_state.env.create_fleet(n_agents=n_agents)
+    # st.session_state.waypoints = generate_waypoints_for_agents(n_agents=n_agents, env_width=100, env_height=100, n_waypoints=3)
     st.session_state.autonomy = Autonomy(st.session_state.env)
     st.session_state.running = False
     st.session_state.step = 0
+  
 
 # Update environment if controls changed
 if n_obstacles != len(st.session_state.env.obstacles) or n_agents != len(st.session_state.agents):
-    st.session_state.env = Environment(width=100, height=100, n_obstacles=n_obstacles, seed=seed)
-    st.session_state.agents = create_fleet(n_agents=n_agents, env=st.session_state.env)
-    st.session_state.waypoints = generate_waypoints_for_agents(n_agents=n_agents, env_width=100, env_height=100, n_waypoints=3)
+    st.session_state.env = Environment(config_file="config.json")
+    st.session_state.agents = st.session_state.env.create_fleet(n_agents=n_agents)
+    # st.session_state.waypoints = generate_waypoints_for_agents(n_agents=n_agents, env_width=100, env_height=100, n_waypoints=3)
     st.session_state.autonomy = Autonomy(st.session_state.env)
     st.session_state.step = 0
     st.session_state.running = False
-
+    
 # Assign some UI columns
 col_map, col_details = st.columns([2, 1])
 
@@ -76,68 +81,84 @@ with col_details:
 with col_map:
     st.subheader("Plant / Area Map (click an agent bubble)")
     # Build map data
-    obs_df = st.session_state.env.obstacles_df()
+    obs_df = st.session_state.env.obstacles
+
     agent_df = pd.DataFrame([a.to_dict() for a in st.session_state.agents])
+    st.dataframe(agent_df)
 
     fig = go.Figure()
 
     # Optional: show floorplan if exists
     try:
-        # place a background image if floorplan.png exists
-        fig.add_layout_image(
+        # Add PNG background if defined
+        if st.session_state.env.floorplan_path:
+            fig.add_layout_image(
             dict(
-                source="factory_floorplan_agents.png",
-                xref="x", yref="y",
-                x=0, y=100, sizex=100, sizey=100,
-                sizing="stretch", opacity=0.5, layer="below"
+                source= st.image(st.session_state.env.floorplan_path, caption="Factory Floorplan with Agents"),
+                xref="x", 
+                yref="y",
+                x=0, 
+                y=st.session_state.env.height, 
+                sizex=st.session_state.env.width, 
+                sizey=st.session_state.env.height,
+                sizing="stretch",
+                opacity=1.0,
+                layer="below"
             )
-        )
+        )  
     except Exception:
         pass
 
-    # obstacles
-    for _, r in obs_df.iterrows():
+        # Plot obstacles as rectangles
+    for obs in st.session_state.env.obstacles:
+        x, y = obs["pos"]
+        w, h = obs["size"]
         fig.add_shape(
-            type="circle",
-            xref="x", yref="y",
-            x0=r["x"]-r["r"], y0=r["y"]-r["r"],
-            x1=r["x"]+r["r"], y1=r["y"]+r["r"],
-            fillcolor="gray", opacity=0.4, line=dict(width=1)
-        )
+        type="rect",
+        x0=x, y0=y,
+        x1=x + w, y1=y + h,
+        line=dict(color="black"),
+        fillcolor="rgba(200,0,0,0.3)"
+         )
 
     # agent bubbles
-    #colors = agent_df["mode"].map({"idle":"blue", "navigating":"green", "avoiding":"orange", "safe_mode":"red", "arrived":"purple", "lost_comms":"black"})
-    #fig.add_trace(go.Scatter(
-    #    x=agent_df["x"],
-    #    y=agent_df["y"],
-    #    mode="markers+text",
-    #    text=agent_df["id"],
-    #   textposition="top center",
-    #   marker=dict(size=16, color=colors),
-    #   hovertemplate="Agent: %{text}<br>Mode: %{marker.color}<extra></extra>"
+    
     # Agents
-        mode_colors = {"idle":"blue", "navigating":"green", "avoiding":"orange",
+    mode_colors = {"idle":"blue", "navigating":"green", "avoiding":"orange",
                    "safe_mode":"red", "arrived":"purple", "lost_comms":"black"
                    }
     
     colors = [mode_colors.get(m.mode, "blue") for m in st.session_state.agents]
+
+  
+    xs= [a.x for a in st.session_state.agents],
+    ys= [a.y for a in st.session_state.agents],
+    ids= [a.id for a in st.session_state.agents]
+    
     
     fig.add_trace(go.Scatter(
-        x=agent_df["x"],
-        y=agent_df["y"],
+        x=xs,
+        y=ys,
         mode="markers+text",
-        text=agent_df["id"],
+        text=ids,
         textposition="top center",
-        marker=dict(size=16, color=colors),
-        hovertemplate="Agent: %{text}<br>Mode: %{marker.color}<extra></extra>"
+        marker=dict(size=12, color="blue"),
+        name="Agents"
+        
     ))
 
-    fig.update_layout(
-        xaxis=dict(range=[0,100], visible=False),
-        yaxis=dict(range=[0,100], visible=False, scaleanchor="x", scaleratio=1),
-        height=700,
-        title=f"Fleet Map - Step {st.session_state.step}"
-    )
+    # Plot waypoints
+    for wid, w in st.session_state.env.waypoints.items():
+     fig.add_trace(go.Scatter(
+        x=[w[0]], y=[w[1]],
+        mode="markers+text",
+        text=wid,
+        name=f"Waypoint {wid}",
+        marker=dict(size=10, color="red")
+    ))
+
+    fig.update_xaxes(range=[0,100], showgrid=False, zeroline=False, visible=False)
+    fig.update_yaxes(range=[0,100], scaleanchor="x", showgrid=False, zeroline=False, visible=False)
     st.plotly_chart(fig, use_container_width=True)
 
     selected_points = plotly_events(fig, click_event=True, select_event=False, override_height=700, key="map_events", override_width="100%"
@@ -147,7 +168,7 @@ with col_map:
         clicked_agent = agent_df.iloc[clicked_idx]["id"]
 
         # Check for double-click (same agent clicked twice in a row)
-        last_clicked = st.session.state.get("last_clicked_agent", None)
+        last_clicked = st.session_state.get("last_clicked_agent", None)
         if last_clicked == clicked_agent:
             st.session_state["zoom_agent"] = clicked_agent
         else:
@@ -229,46 +250,46 @@ if "zoom_agent" in st.session_state and st.session_state["zoom_agent"]:
 if st.session_state.running:
     # loop for configured steps
     for s in range(st.session_state.step, steps):
-        st.session_state.step = s
-        # process agents
-        for idx, agent in enumerate(st.session_state.agents):
+            st.session_state.step = s
+            # process agents
+            for idx, agent in enumerate(st.session_state.agents):
             # determine whether this agent has failures
-            sensor_ok = True
-            comms_ok = True
+                sensor_ok = True
+                comms_ok = True
 
-            # sensor dropout injection
-            if sensor_dropout_agent != "None" and agent.id == sensor_dropout_agent and s >= dropout_when_step:
-                sensor_ok = False
+                # sensor dropout injection
+                if sensor_dropout_agent != "None" and agent.id == sensor_dropout_agent and s >= dropout_when_step:
+                    sensor_ok = False
 
-            # comms loss injection
-            if comm_loss_agent != "None" and agent.id == comm_loss_agent and s >= comm_loss_step:
-                comms_ok = False
-                agent.mode = "lost_comms"
-                agent.log.append("Lost communications")
+                # comms loss injection
+                if comm_loss_agent != "None" and agent.id == comm_loss_agent and s >= comm_loss_step:
+                    comms_ok = False
+                    agent.mode = "lost_comms"
+                    agent.log.append("Lost communications")
 
-            # get current waypoint for agent
-            wp_list = st.session_state.waypoints[idx]
-            # choose waypoint index by checking if arrived
-            # we'll pick the first waypoint not reached
-            target_wp = None
-            for wp in wp_list:
-                if (abs(agent.x - wp[0]) > 1.5) or (abs(agent.y - wp[1]) > 1.5):
-                    target_wp = wp
+                # get current waypoint for agent
+                wp_list = st.session_state.waypoints[idx]
+                # choose waypoint index by checking if arrived
+                # we'll pick the first waypoint not reached
+                target_wp = None
+                for wp in wp_list:
+                    if (abs(agent.x - wp[0]) > 1.5) or (abs(agent.y - wp[1]) > 1.5):
+                        target_wp = wp
                     break
-            if target_wp is None:
-                # all arrived; idle
-                agent.mode = "arrived"
-                agent.vx = 0; agent.vy = 0
-                continue
+                if target_wp is None:
+                    # all arrived; idle
+                    agent.mode = "arrived"
+                    agent.vx = 0; agent.vy = 0
+                    continue
 
-            # If comms lost, do not update position (simulate stuck)
-            if not comms_ok:
-                agent.log.append("Comms lost -> holding position")
-                continue
+                # If comms lost, do not update position (simulate stuck)
+                if not comms_ok:
+                    agent.log.append("Comms lost -> holding position")
+                    continue
 
-            # autonomy compute
-            new_x, new_y, mode, reason = st.session_state.autonomy.compute_control(
-                agent, waypoint=target_wp, dt=1.0, sensor_ok=sensor_ok
+                # autonomy compute
+                new_x, new_y, mode, reason = st.session_state.autonomy.compute_control(
+                    agent, waypoint=target_wp, dt=1.0, sensor_ok=sensor_ok
             )
             agent.x = new_x
             agent.y = new_y
@@ -281,72 +302,72 @@ if st.session_state.running:
             elif reason == "sensor_dropout":
                 agent.log.append(f"Step {s}: sensor dropout -> safe_mode")
 
-        # Render update UI
-        # Fleet map refresh (reuse plotting code quickly)
-        agent_df = pd.DataFrame([a.to_dict() for a in st.session_state.agents])
-        obs_df = st.session_state.env.obstacles_df()
+            # Render update UI
+            # Fleet map refresh (reuse plotting code quickly)
+            agent_df = pd.DataFrame([a.to_dict() for a in st.session_state.agents])
+            obs_df = st.session_state.env.obstacles_df()
 
-        fig2 = go.Figure()
+            fig2 = go.Figure()
         # background image try
-        try:
-            fig2.add_layout_image(
-                dict(
-                    source="floorplan.png",
+            try:
+                fig2.add_layout_image(
+                    dict(
+                        source= st.image(floorplan_path),
+                        xref="x", yref="y",
+                        x=0, y=100, sizex=100, sizey=100,
+                        sizing="stretch", opacity=0.5, layer="below"
+                    )
+            )
+            except Exception:
+                pass
+
+            for _, r in obs_df.iterrows():
+                fig2.add_shape(
+                    type="circle",
                     xref="x", yref="y",
-                    x=0, y=100, sizex=100, sizey=100,
-                    sizing="stretch", opacity=0.5, layer="below"
-                )
-            )
-        except Exception:
-            pass
+                    x0=r["x"]-r["r"], y0=r["y"]-r["r"],
+                    x1=r["x"]+r["r"], y1=r["y"]+r["r"],
+                    fillcolor="gray", opacity=0.4, line=dict(width=1)
+             )
 
-        for _, r in obs_df.iterrows():
-            fig2.add_shape(
-                type="circle",
-                xref="x", yref="y",
-                x0=r["x"]-r["r"], y0=r["y"]-r["r"],
-                x1=r["x"]+r["r"], y1=r["y"]+r["r"],
-                fillcolor="gray", opacity=0.4, line=dict(width=1)
-            )
-
-        mode_colors = {
-            "idle":"blue", "navigating":"green", "avoiding":"orange",
-            "safe_mode":"red", "arrived":"purple", "lost_comms":"black"
+            mode_colors = {
+                "idle":"blue", "navigating":"green", "avoiding":"orange",
+                "safe_mode":"red", "arrived":"purple", "lost_comms":"black"
         }
-        colors = [mode_colors.get(m.mode, "blue") for m in st.session_state.agents]
+            colors = [mode_colors.get(m.mode, "blue") for m in st.session_state.agents]
 
-        fig2.add_trace(go.Scatter(
-            x=agent_df["x"],
-            y=agent_df["y"],
-            mode="markers+text",
-            text=agent_df["id"],
-            textposition="top center",
-            marker=dict(size=16, color=colors),
-            hovertemplate="Agent: %{text}<br>Mode: %{marker.color}<extra></extra>"
-        ))
+            fig2.add_trace(go.Scatter(
+                x=agent_df["x"],
+                y=agent_df["y"],
+                mode="markers+text",
+                text=agent_df["id"],
+                textposition="top center",
+                marker=dict(size=16, color=colors),
+                hovertemplate="Agent: %{text}<br>Mode: %{marker.color}<extra></extra>"
+            ))
 
-        fig2.update_layout(xaxis=dict(range=[0,100], visible=False),
+            fig2.update_layout(xaxis=dict(range=[0,100], visible=False),
                            yaxis=dict(range=[0,100], visible=False, scaleanchor="x", scaleratio=1),
                            height=700, title=f"Fleet Map - Step {st.session_state.step}")
-        # use a placeholder to update map in-place
-        map_placeholder = st.empty()
-        map_placeholder.plotly_chart(fig2, use_container_width=True)
+            # use a placeholder to update map in-place
+            map_placeholder = st.empty()
+            map_placeholder.plotly_chart(fig2, use_container_width=True)
 
-        # show details for selected agent
-        sel_agent = next((a for a in st.session_state.agents if a.id == selected), None)
-        if sel_agent:
-            st.sidebar.markdown(f"**Selected: {sel_agent.id}**")
-            st.sidebar.write(f"Mode: {sel_agent.mode}")
-            st.sidebar.write(f"Position: ({sel_agent.x:.1f},{sel_agent.y:.1f})")
-            st.sidebar.write("Recent log:")
+            # show details for selected agent
+            sel_agent = next((a for a in st.session_state.agents if a.id == selected), None)
+            if sel_agent:
+                st.sidebar.markdown(f"**Selected: {sel_agent.id}**")
+                st.sidebar.write(f"Mode: {sel_agent.mode}")
+                st.sidebar.write(f"Position: ({sel_agent.x:.1f},{sel_agent.y:.1f})")
+                st.sidebar.write("Recent log:")
             for msg in sel_agent.log[-6:]:
                 st.sidebar.write(f"- {msg}")
 
-        time.sleep(step_delay)
+            time.sleep(step_delay)
 
-        # break early if stop clicked (Streamlit can't update a variable mid-loop from UI easily)
-        if not st.session_state.running:
-            break
+            # break early if stop clicked (Streamlit can't update a variable mid-loop from UI easily)
+            if not st.session_state.running:
+                break
 
     # mission finished or stopped
     st.session_state.running = False
